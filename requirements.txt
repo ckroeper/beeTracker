@@ -1,0 +1,6 @@
+ultralytics==8.3.17
+streamlit==1.40.2
+pandas
+opencv-python
+# We are not including torch or torchvision here, because user must install them
+# according to their environment (GPU support, platform, etc.).
