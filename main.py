@@ -221,8 +221,7 @@ def load_video(uploaded_file):
 
 
 def main():
-    st.json(st.session_state)
-
+    # st.json(st.session_state) # use this for debugging
     st.title("BeeTrack")
     st.write(
         "Use this tool to run bee detection or tracking on your video. Upload a video, choose the mode, and run inference."
