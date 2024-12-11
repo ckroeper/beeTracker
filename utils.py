@@ -62,7 +62,7 @@ def calc_progress_metrics(frame_idx, total_frames, start_time):
 
     return (
         progress,
-        f"Running inference... {int(fps)} Frames Per Second, {int(progress*100)}% Completed, {eta_minutes}:{eta_seconds} Until Complete",
+        f"Running inference... {int(fps)} Frames Per Second, {int(progress*100)}% Completed, {str(eta_minutes).zfill(2)}:{str(eta_seconds).zfill(2)} Until Complete",
     )
 
 

@@ -1,4 +1,3 @@
-from collections import defaultdict, deque
 import os
 import tempfile
 import time
@@ -25,7 +24,7 @@ from utils import (
 def load_model():
     print("Loading model")
 
-    return YOLO("models/yolo11l-bee.pt")
+    return YOLO("models/yolo11l-bee.pt", task="detect")
 
 
 # for better performance, play around with batch_sz
@@ -36,7 +35,7 @@ def run_inference(
     mode="detection",
     progress_callback=None,
     stop_flag=lambda: False,
-    batch_sz=8,
+    batch_sz=4,
 ):
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
@@ -131,6 +130,7 @@ def run_inference(
 
     cap.release()
     st.toast("Video processed successfully")
+    st.session_state.inference_running = False
     st.session_state.results = np.vstack(results)
 
 
@@ -155,7 +155,7 @@ def render_video_with_overlays(
     queen_color = st.session_state.queen_color
     path_color = st.session_state.queen_color
 
-    print("Beginning to render video, saving to: ", out_path)
+    print("Beginning to render video")
 
     # Preprocess res by frame
     frame_idxs = results[:, 0].astype(int)
@@ -198,7 +198,7 @@ def render_video_with_overlays(
     cap.release()
     out.release()
 
-    st.toast("Video created successfully")
+    st.toast(f"Saving video to {out_path}")
     st.session_state.overlay_video_path = out_path
 
 
@@ -221,6 +221,8 @@ def load_video(uploaded_file):
 
 
 def main():
+    st.json(st.session_state)
+
     st.title("BeeTrack")
     st.write(
         "Use this tool to run bee detection or tracking on your video. Upload a video, choose the mode, and run inference."
@@ -288,81 +290,112 @@ def main():
         on_click=update_running_state,
     )
 
+    inference_section = st.empty()
+
     # If inference is running, show the progress bar and cancel buttons
     if st.session_state.inference_running:
-        progress_bar = st.progress(0, text="Running inference...")
-        cancel_button = st.button("Cancel Inference")
-        if cancel_button:
-            st.session_state.cancel_requested = True
+        with inference_section.container():
+            progress_bar = st.progress(0, text="Running inference...")
+            cancel_button = st.button("Cancel Inference")
 
-        # Run inference
-        def update_progress(p, text):
-            progress_bar.progress(p, text=text)
+            if cancel_button:
+                st.session_state.cancel_requested = True
 
-        def stop_flag():
-            return st.session_state.cancel_requested
+            # Run inference
+            def update_progress(p, text):
+                progress_bar.progress(p, text=text)
 
-        run_inference(
-            model,
-            st.session_state.temp_video_path,
-            mode=mode.lower(),
-            progress_callback=update_progress,
-            stop_flag=stop_flag,
-        )
-        st.session_state.inference_running = False
+            def stop_flag():
+                st.session_state.inference_running = False
+                return st.session_state.cancel_requested
+
+            run_inference(
+                model,
+                st.session_state.temp_video_path,
+                mode=mode.lower(),
+                progress_callback=update_progress,
+                stop_flag=stop_flag,
+            )
+            st.session_state.inference_running = False
+
+    export_results_section = st.empty()
+    progress_bar_placeholder = st.empty()
+    if "video_placeholder" not in st.session_state:
+        st.session_state.video_placeholder = st.empty()
 
     # if inference is done and we have results, show options to save
-    if st.session_state.results is not None and not st.session_state.inference_running:
-        st.header("Export Results")
+    with export_results_section.container():
+        if (
+            st.session_state.results is not None
+            and not st.session_state.inference_running
+        ):
+            st.header("Export Results")
 
-        def generate_name(mode):
-            csv_out_dir = ensure_path_exists("./results/positions")
-            input_video_name = os.path.splitext(st.session_state.last_uploaded_file)[
-                0
-            ]  # get only name component
-            return f"{csv_out_dir}/{input_video_name}-{'detect' if mode != 'Tracking' else 'track'}-positions.csv"
+            # clear previous section once we get here
+            inference_section.empty()
 
-        def export_on_click(mode):
-            save_path = generate_name(mode)
-            save_results_to_csv(save_path, st.session_state.results, mode.lower())
+            def generate_name(mode):
+                csv_out_dir = ensure_path_exists("./results/positions")
+                input_video_name = os.path.splitext(
+                    st.session_state.last_uploaded_file
+                )[0]  # get only name component
+                return f"{csv_out_dir}/{input_video_name}-{'detect' if mode != 'Tracking' else 'track'}-positions.csv"
 
-        bee_color = st.color_picker("Bee Color", value="#FFFF00")  # yellow
-        queen_color = st.color_picker("Queen Color", value="#FF0000")  # red
-        path_color_placeholder = st.empty()
+            def export_on_click(mode):
+                save_path = generate_name(mode)
+                st.toast(f"Saving output to {save_path}")
+                save_results_to_csv(save_path, st.session_state.results, mode.lower())
 
-        st.session_state.bee_color = hex_to_bgr(bee_color)
-        st.session_state.queen_color = hex_to_bgr(queen_color)
+            st.subheader("Set Colors")
+            color_row = st.columns([1, 1, 1, 9])
+            with color_row[0]:
+                bee_color = st.color_picker("Bee Color", value="#FFFF00")  # yellow
+            with color_row[1]:
+                queen_color = st.color_picker("Queen Color", value="#FF0000")  # red
+            with color_row[2]:
+                path_color_placeholder = st.empty()
 
-        draw_boxes = st.checkbox("Draw Bounding Boxes", value=True)
+            st.subheader("Toggle Options")
+            checkbox_row = st.columns([1, 1, 10])
+            with checkbox_row[0]:
+                draw_boxes = st.checkbox("Draw Boxes", value=True)
+            with checkbox_row[1]:
+                draw_paths_placeholder = st.empty()
 
-        draw_paths = False
-        if mode == "Tracking":
-            draw_paths = st.checkbox("Draw Paths", value=False)
-            path_color = path_color_placeholder.color_picker(
-                "Path Color", value="#FFFFFF"
-            )  # white
-            st.session_state.path_color = hex_to_bgr(path_color)
+            st.subheader("Export Data")
+            button_row = st.columns([1, 1, 10])
+            with button_row[0]:
+                csv_button_placeholder = st.empty()
+            with button_row[1]:
+                video_button_placeholder = st.empty()
 
-        progress_bar_placeholder = st.empty()
-        video_placeholder = st.empty()
+            st.session_state.bee_color = hex_to_bgr(bee_color)
+            st.session_state.queen_color = hex_to_bgr(queen_color)
 
-        st.button("Export CSV", on_click=export_on_click, args=(mode,))
-        st.button(
-            "Export Video",
-            on_click=generate_video_section,
-            args=(
-                mode,
-                draw_boxes,
-                draw_paths,
-                progress_bar_placeholder,
-                video_placeholder,
-            ),
-        )
+            draw_paths = False
+            if mode == "Tracking":
+                draw_paths = draw_paths_placeholder.checkbox("Draw Paths", value=False)
+                path_color = path_color_placeholder.color_picker(
+                    "Path Color", value="#FFFFFF"
+                )  # white
+                st.session_state.path_color = hex_to_bgr(path_color)
+
+            csv_button_placeholder.button(
+                "Export CSV", on_click=export_on_click, args=(mode,)
+            )
+            video_button_placeholder.button(
+                "Export Video",
+                on_click=generate_video_section,
+                args=(
+                    mode,
+                    draw_boxes,
+                    draw_paths,
+                    progress_bar_placeholder,
+                ),
+            )
 
 
-def generate_video_section(
-    mode, draw_boxes, draw_paths, progress_bar_placeholder, video_placeholder
-):
+def generate_video_section(mode, draw_boxes, draw_paths, progress_bar_placeholder):
     def generate_name(mode):
         vid_out_dir = ensure_path_exists("./results/videos")
         input_video_name = os.path.splitext(st.session_state.last_uploaded_file)[
@@ -387,7 +420,7 @@ def generate_video_section(
         out_path=save_path,
     )
 
-    video_placeholder.video(
+    st.session_state.video_placeholder.video(
         st.session_state.overlay_video_path, autoplay=True, muted=True
     )
 
@@ -395,57 +428,3 @@ def generate_video_section(
 if __name__ == "__main__":
     st.set_page_config("BeeTrack", layout="wide")
     main()
-
-    # # if inference is done and we have results, show options to save
-    # if st.session_state.results is not None and not st.session_state.inference_running:
-    #     st.header("Export Results")
-    #
-    #     csv_col, video_col = st.columns(2)
-    #
-    #     with csv_col:
-    #
-    #         def generate_name(mode):
-    #             csv_out_dir = ensure_path_exists("./results/positions")
-    #             input_video_name = os.path.splitext(
-    #                 st.session_state.last_uploaded_file
-    #             )[0]  # get only name component
-    #             return f"{csv_out_dir}/{input_video_name}-{'detect' if mode != 'Tracking' else 'track'}-positions.csv"
-    #
-    #         def export_on_click(mode):
-    #             save_path = generate_name(mode)
-    #             save_results_to_csv(save_path, st.session_state.results, mode.lower())
-    #
-    #         st.button("Export CSV", on_click=export_on_click, args=(mode,))
-    #
-    #     with video_col:
-    #         bee_color = st.color_picker("Bee Color", value="#FFFF00")  # yellow
-    #         queen_color = st.color_picker("Queen Color", value="#FF0000")  # red
-    #         path_color_placeholder = st.empty()
-    #
-    #         st.session_state.bee_color = hex_to_bgr(bee_color)
-    #         st.session_state.queen_color = hex_to_bgr(queen_color)
-    #
-    #         draw_boxes = st.checkbox("Draw Bounding Boxes", value=True)
-    #
-    #         draw_paths = False
-    #         if mode == "Tracking":
-    #             draw_paths = st.checkbox("Draw Paths", value=False)
-    #             path_color = path_color_placeholder.color_picker(
-    #                 "Path Color", value="#FFFFFF"
-    #             )  # white
-    #             st.session_state.path_color = hex_to_bgr(path_color)
-    #
-    #         progress_bar_placeholder = st.empty()
-    #         video_placeholder = st.empty()
-    #
-    #         st.button(
-    #             "Create Video",
-    #             on_click=generate_video_section,
-    #             args=(
-    #                 mode,
-    #                 draw_boxes,
-    #                 draw_paths,
-    #                 progress_bar_placeholder,
-    #                 video_placeholder,
-    #             ),
-    #         )
