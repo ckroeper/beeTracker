@@ -1,9 +1,6 @@
-<<<<<<< HEAD
 # beeTracker
-=======
----
 
-### `README.md`
+---
 
 This is the main project readme, which can briefly point users to `setup_env.md`.
 
@@ -22,4 +19,3 @@ This project uses YOLO (ultralytics), Streamlit, Pandas, OpenCV, and PyTorch. Pl
 
 For detailed instructions and troubleshooting, consult [SETUP_ENV.md](./setup_env.md).
 ```
->>>>>>> 6f5ffa8 (first commit)
